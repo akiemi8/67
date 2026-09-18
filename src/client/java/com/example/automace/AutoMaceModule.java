@@ -21,17 +21,15 @@ public class AutoMaceModule {
     private static int comboTimer = 0;
     private static LivingEntity lockedTarget = null;
 
-    // ===== Auto Lunge (same style as Stun Slam) =====
-    private static boolean performingLunge = false;
-    private static int lungeStage = 0;
-    private static int lungeTimer = 0;
-    private static int lungeOriginalSlot = -1;
+    // Simple spam Lunge
     private static boolean wasAttackPressed = false;
+    private static int lungeCooldown = 0;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
 
-        handleAutoLunge(client);
+        // ===== AUTO LUNGE (spam version) =====
+        handleSpamLunge(client);
 
         // ===== STUN SLAM =====
         if (cooldown > 0) {
@@ -56,68 +54,41 @@ public class AutoMaceModule {
         }
     }
 
-    // ==================== AUTO LUNGE (Stun Slam style) ====================
-    private static void handleAutoLunge(MinecraftClient client) {
-        boolean attacking = client.options.attackKey.isPressed();
-
-        // Start the lunge sequence when clicking with Wind Charge
-        if (!performingLunge && isHoldingWindCharge(client) && attacking && !wasAttackPressed) {
-            int spearSlot = findAnySpearSlot(client);
-            if (spearSlot != -1) {
-                lungeOriginalSlot = client.player.getInventory().getSelectedSlot();
-                performingLunge = true;
-                lungeStage = 0;
-                lungeTimer = 0;
-            }
+    // ==================== SPAM LUNGE ====================
+    private static void handleSpamLunge(MinecraftClient client) {
+        if (lungeCooldown > 0) {
+            lungeCooldown--;
+            return;
         }
 
-        wasAttackPressed = attacking;
+        boolean attacking = client.options.attackKey.isPressed();
 
-        if (!performingLunge) return;
+        // Only trigger on a new click while holding Wind Charge
+        if (isHoldingWindCharge(client) && attacking && !wasAttackPressed) {
+            int spearSlot = findAnySpearSlot(client);
 
-        int spearSlot = findAnySpearSlot(client);
+            if (spearSlot != -1) {
+                int windSlot = client.player.getInventory().getSelectedSlot();
 
-        switch (lungeStage) {
-            case 0 -> { // Swap to spear
-                if (spearSlot != -1) {
-                    client.player.getInventory().setSelectedSlot(spearSlot);
-                }
-                lungeStage = 1;
-                lungeTimer = 1; // 1 tick delay
-            }
-            case 1 -> { // Wait then attack (this should trigger Lunge)
-                if (lungeTimer > 0) {
-                    lungeTimer--;
-                    return;
-                }
+                // Swap to spear
+                client.player.getInventory().setSelectedSlot(spearSlot);
 
-                // Attack
+                // Attack (this should trigger Lunge)
                 client.player.swingHand(Hand.MAIN_HAND);
                 if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
                     Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
                     client.interactionManager.attackEntity(client.player, e);
                 }
 
-                lungeStage = 2;
-                lungeTimer = 1;
-            }
-            case 2 -> { // Wait then swap back
-                if (lungeTimer > 0) {
-                    lungeTimer--;
-                    return;
-                }
+                // Instantly swap back
+                client.player.getInventory().setSelectedSlot(windSlot);
 
-                if (lungeOriginalSlot != -1) {
-                    client.player.getInventory().setSelectedSlot(lungeOriginalSlot);
-                }
-
-                // Finished
-                performingLunge = false;
-                lungeStage = 0;
-                lungeTimer = 0;
-                lungeOriginalSlot = -1;
+                // Small cooldown so it doesn't completely break
+                lungeCooldown = 3;
             }
         }
+
+        wasAttackPressed = attacking;
     }
 
     private static boolean isHoldingWindCharge(MinecraftClient client) {
