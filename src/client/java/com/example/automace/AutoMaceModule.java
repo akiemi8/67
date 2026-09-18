@@ -26,12 +26,13 @@ public class AutoMaceModule {
             return;
         }
 
+        // Keep running the combo even from high falls
         if (performingCombo) {
             handleStunSlam(client);
             return;
         }
 
-        // Only activate when falling enough
+        // Only start if we have enough fall distance
         if (client.player.fallDistance < Config.minFallDistance) return;
 
         LivingEntity target = getCrosshairTarget(client);
@@ -40,12 +41,11 @@ public class AutoMaceModule {
         if (Config.oneTickStunSlam && target.isBlocking()) {
             startStunSlam(client, target);
         } else {
-            // Normal mace smash
             performMaceSmash(client, target);
         }
     }
 
-    // ==================== 1-TICK STUN SLAM ====================
+    // ==================== AGGRESSIVE 1-TICK STUN SLAM ====================
     private static void startStunSlam(MinecraftClient client, LivingEntity target) {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
@@ -61,6 +61,7 @@ public class AutoMaceModule {
     private static void handleStunSlam(MinecraftClient client) {
         LivingEntity target = lockedTarget;
 
+        // Only cancel if the target is actually gone
         if (target == null || !target.isAlive() || target.isRemoved()) {
             finishCombo(client);
             return;
@@ -69,21 +70,19 @@ public class AutoMaceModule {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
 
-        switch (comboStage) {
-            case 0 -> { // Axe hit
-                if (axeSlot != -1) {
-                    client.player.getInventory().setSelectedSlot(axeSlot);
-                    attack(client, target);
-                }
-                comboStage = 1;
+        if (comboStage == 0) {
+            // Axe
+            if (axeSlot != -1) {
+                client.player.getInventory().setSelectedSlot(axeSlot);
+                forceAttack(client, target);
             }
-            case 1 -> { // Instantly Mace hit (1-tick)
-                if (maceSlot != -1) {
-                    client.player.getInventory().setSelectedSlot(maceSlot);
-                    attack(client, target);
-                }
-                finishCombo(client);
+            comboStage = 1;
+            // Immediately go to mace in the same method call for tighter timing
+            if (maceSlot != -1) {
+                client.player.getInventory().setSelectedSlot(maceSlot);
+                forceAttack(client, target);
             }
+            finishCombo(client);
         }
     }
 
@@ -105,12 +104,20 @@ public class AutoMaceModule {
 
         originalSlot = client.player.getInventory().getSelectedSlot();
         client.player.getInventory().setSelectedSlot(maceSlot);
-        attack(client, target);
+        forceAttack(client, target);
 
         if (Config.restoreSlot) {
             client.player.getInventory().setSelectedSlot(originalSlot);
         }
         cooldown = Math.max(2, Config.attackDelayTicks);
+    }
+
+    // Stronger attack method
+    private static void forceAttack(MinecraftClient client, LivingEntity target) {
+        client.interactionManager.attackEntity(client.player, target);
+        client.player.swingHand(Hand.MAIN_HAND);
+        // Force the swing animation too
+        client.player.resetLastAttackedTicks();
     }
 
     // ==================== HELPERS ====================
@@ -128,11 +135,6 @@ public class AutoMaceModule {
             return null;
         }
         return living;
-    }
-
-    private static void attack(MinecraftClient client, LivingEntity target) {
-        client.interactionManager.attackEntity(client.player, target);
-        client.player.swingHand(Hand.MAIN_HAND);
     }
 
     private static int findSlot(MinecraftClient client, boolean lookingForAxe) {
