@@ -1,8 +1,6 @@
 package com.example.automace;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -10,7 +8,6 @@ import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
@@ -26,14 +23,16 @@ public class AutoMaceModule {
 
     // Auto Lunge
     private static boolean wasAttackPressed = false;
-    private static int lungeTicks = -1;
+    private static int lungeStage = 0; // 0 = idle, 1 = swapped, 2 = attacked
     private static int savedSlot = -1;
+    private static int lungeTimer = 0;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
 
         handleAutoLunge(client);
 
+        // ===== STUN SLAM =====
         if (cooldown > 0) {
             cooldown--;
             return;
@@ -44,9 +43,7 @@ public class AutoMaceModule {
             return;
         }
 
-        if (client.player.fallDistance < Config.minFallDistance) {
-            return;
-        }
+        if (client.player.fallDistance < Config.minFallDistance) return;
 
         LivingEntity target = getCrosshairTarget(client);
         if (target == null) return;
@@ -56,6 +53,63 @@ public class AutoMaceModule {
         } else {
             performSimpleMaceSwap(client, target);
         }
+    }
+
+    // ==================== AUTO LUNGE (simplified & more aggressive) ====================
+    private static void handleAutoLunge(MinecraftClient client) {
+        boolean attacking = client.options.attackKey.isPressed();
+
+        // Start
+        if (isHoldingWindCharge(client) && attacking && !wasAttackPressed && lungeStage == 0) {
+            int spearSlot = findAnySpearSlot(client); // any spear for now
+            if (spearSlot != -1) {
+                savedSlot = client.player.getInventory().getSelectedSlot();
+                client.player.getInventory().setSelectedSlot(spearSlot);
+                lungeStage = 1;
+                lungeTimer = 1; // very short delay
+            }
+        }
+
+        if (lungeStage == 1) {
+            if (lungeTimer > 0) {
+                lungeTimer--;
+                return;
+            }
+
+            // Attack to trigger Lunge
+            client.player.swingHand(Hand.MAIN_HAND);
+
+            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
+                Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
+                client.interactionManager.attackEntity(client.player, e);
+            }
+
+            // Swap back immediately
+            if (savedSlot != -1) {
+                client.player.getInventory().setSelectedSlot(savedSlot);
+            }
+
+            lungeStage = 0;
+            savedSlot = -1;
+        }
+
+        wasAttackPressed = attacking;
+    }
+
+    private static boolean isHoldingWindCharge(MinecraftClient client) {
+        return client.player.getMainHandStack().isOf(Items.WIND_CHARGE);
+    }
+
+    // Just find any spear (we assume you put a Lunge spear in hotbar)
+    private static int findAnySpearSlot(MinecraftClient client) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = client.player.getInventory().getStack(i);
+            Identifier id = Registries.ITEM.getId(stack.getItem());
+            if (id.getPath().contains("spear")) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     // ==================== STUN SLAM ====================
@@ -125,79 +179,16 @@ public class AutoMaceModule {
         cooldown = Math.max(3, Config.attackDelayTicks);
     }
 
-    // ==================== AUTO LUNGE ====================
-    private static void handleAutoLunge(MinecraftClient client) {
-        boolean attacking = client.options.attackKey.isPressed();
-
-        if (isHoldingWindCharge(client) && attacking && !wasAttackPressed && lungeTicks == -1) {
-            int spearSlot = findLungeSpearSlot(client);
-            if (spearSlot != -1) {
-                savedSlot = client.player.getInventory().getSelectedSlot();
-                client.player.getInventory().setSelectedSlot(spearSlot);
-                lungeTicks = 2;
-            }
-        }
-
-        if (lungeTicks > 0) {
-            lungeTicks--;
-        } else if (lungeTicks == 0) {
-            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
-                Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
-                client.interactionManager.attackEntity(client.player, e);
-            }
-            client.player.swingHand(Hand.MAIN_HAND);
-
-            if (savedSlot != -1) {
-                client.player.getInventory().setSelectedSlot(savedSlot);
-            }
-
-            lungeTicks = -1;
-            savedSlot = -1;
-        }
-
-        wasAttackPressed = attacking;
-    }
-
-    private static boolean isHoldingWindCharge(MinecraftClient client) {
-        return client.player.getMainHandStack().isOf(Items.WIND_CHARGE);
-    }
-
-    private static int findLungeSpearSlot(MinecraftClient client) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = client.player.getInventory().getStack(i);
-            Identifier id = Registries.ITEM.getId(stack.getItem());
-            if (!id.getPath().contains("spear")) continue;
-            if (hasLunge(stack)) return i;
-        }
-        return -1;
-    }
-
-    // Fixed for 1.21.11
-    private static boolean hasLunge(ItemStack stack) {
-        for (var entry : EnchantmentHelper.getEnchantments(stack).getEnchantmentEntries()) {
-            RegistryEntry<Enchantment> enchantEntry = entry.getKey();
-            Identifier id = enchantEntry.getKey().map(k -> k.getValue()).orElse(null);
-            if (id != null && id.getPath().equals("lunge")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     // ==================== HELPERS ====================
     private static LivingEntity getCrosshairTarget(MinecraftClient client) {
-        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
-            return null;
-        }
+        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) return null;
 
         Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
         if (!(entity instanceof LivingEntity living)) return null;
         if (!living.isAlive() || living == client.player) return null;
         if (Config.onlyVsPlayers && !(living instanceof PlayerEntity)) return null;
 
-        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) {
-            return null;
-        }
+        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) return null;
         return living;
     }
 
