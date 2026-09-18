@@ -5,7 +5,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
@@ -68,7 +67,7 @@ public class AutoMaceModule {
             if (spearSlot != -1) {
                 spearOriginalSlot = client.player.getInventory().getSelectedSlot();
                 client.player.getInventory().setSelectedSlot(spearSlot); // swap to spear immediately
-                spearDelay = 3; // wait 3 ticks then attack
+                spearDelay = 2; // wait 2 ticks then attack
             }
         }
 
