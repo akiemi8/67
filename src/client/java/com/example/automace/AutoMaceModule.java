@@ -10,6 +10,8 @@ import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 
 public class AutoMaceModule {
     private static int cooldown = 0;
@@ -26,16 +28,14 @@ public class AutoMaceModule {
             return;
         }
 
-        // Keep running the combo even from high falls
         if (performingCombo) {
             handleStunSlam(client);
             return;
         }
 
-        // Only start if we have enough fall distance
         if (client.player.fallDistance < Config.minFallDistance) return;
 
-        LivingEntity target = getCrosshairTarget(client);
+        LivingEntity target = getTarget(client);
         if (target == null) return;
 
         if (Config.oneTickStunSlam && target.isBlocking()) {
@@ -45,11 +45,10 @@ public class AutoMaceModule {
         }
     }
 
-    // ==================== AGGRESSIVE 1-TICK STUN SLAM ====================
+    // ==================== 1-TICK STUN SLAM ====================
     private static void startStunSlam(MinecraftClient client, LivingEntity target) {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
-
         if (axeSlot == -1 || maceSlot == -1) return;
 
         originalSlot = client.player.getInventory().getSelectedSlot();
@@ -61,7 +60,6 @@ public class AutoMaceModule {
     private static void handleStunSlam(MinecraftClient client) {
         LivingEntity target = lockedTarget;
 
-        // Only cancel if the target is actually gone
         if (target == null || !target.isAlive() || target.isRemoved()) {
             finishCombo(client);
             return;
@@ -70,17 +68,15 @@ public class AutoMaceModule {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
 
+        // Stage 0: Axe + Mace in the tightest possible way
         if (comboStage == 0) {
-            // Axe
             if (axeSlot != -1) {
                 client.player.getInventory().setSelectedSlot(axeSlot);
-                forceAttack(client, target);
+                attack(client, target);
             }
-            comboStage = 1;
-            // Immediately go to mace in the same method call for tighter timing
             if (maceSlot != -1) {
                 client.player.getInventory().setSelectedSlot(maceSlot);
-                forceAttack(client, target);
+                attack(client, target);
             }
             finishCombo(client);
         }
@@ -97,14 +93,14 @@ public class AutoMaceModule {
         cooldown = Math.max(2, Config.attackDelayTicks);
     }
 
-    // ==================== NORMAL MACE SMASH ====================
+    // ==================== NORMAL MACE ====================
     private static void performMaceSmash(MinecraftClient client, LivingEntity target) {
         int maceSlot = findSlot(client, false);
         if (maceSlot == -1) return;
 
         originalSlot = client.player.getInventory().getSelectedSlot();
         client.player.getInventory().setSelectedSlot(maceSlot);
-        forceAttack(client, target);
+        attack(client, target);
 
         if (Config.restoreSlot) {
             client.player.getInventory().setSelectedSlot(originalSlot);
@@ -112,29 +108,46 @@ public class AutoMaceModule {
         cooldown = Math.max(2, Config.attackDelayTicks);
     }
 
-    // Stronger attack method
-    private static void forceAttack(MinecraftClient client, LivingEntity target) {
+    private static void attack(MinecraftClient client, LivingEntity target) {
         client.interactionManager.attackEntity(client.player, target);
         client.player.swingHand(Hand.MAIN_HAND);
-        // Force the swing animation too
-        client.player.resetLastAttackedTicks();
     }
 
-    // ==================== HELPERS ====================
-    private static LivingEntity getCrosshairTarget(MinecraftClient client) {
-        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
-            return null;
+    // ==================== BETTER TARGETING FOR HIGH FALLS ====================
+    private static LivingEntity getTarget(MinecraftClient client) {
+        // First try normal crosshair
+        if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
+            Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
+            if (entity instanceof LivingEntity living && isValid(client, living)) {
+                return living;
+            }
         }
 
-        Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
-        if (!(entity instanceof LivingEntity living)) return null;
-        if (!living.isAlive() || living == client.player) return null;
-        if (Config.onlyVsPlayers && !(living instanceof PlayerEntity)) return null;
+        // Fallback for high falls: look for the closest valid player in a small range
+        // (still very tight so it doesn't feel like expanded hitboxes)
+        Vec3d eye = client.player.getEyePos();
+        Box box = client.player.getBoundingBox().expand(Config.range + 0.4);
 
-        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) {
-            return null;
+        LivingEntity best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        for (Entity e : client.world.getOtherEntities(client.player, box)) {
+            if (!(e instanceof LivingEntity living)) continue;
+            if (!isValid(client, living)) continue;
+
+            double d = living.squaredDistanceTo(eye);
+            if (d < bestDist) {
+                bestDist = d;
+                best = living;
+            }
         }
-        return living;
+        return best;
+    }
+
+    private static boolean isValid(MinecraftClient client, LivingEntity e) {
+        if (!e.isAlive() || e == client.player) return false;
+        if (Config.onlyVsPlayers && !(e instanceof PlayerEntity)) return false;
+        return client.player.squaredDistanceTo(e) <= (Config.range + 0.5) * (Config.range + 0.5);
     }
 
     private static int findSlot(MinecraftClient client, boolean lookingForAxe) {
