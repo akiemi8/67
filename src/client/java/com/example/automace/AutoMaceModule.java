@@ -21,11 +21,12 @@ public class AutoMaceModule {
     private static int comboTimer = 0;
     private static LivingEntity lockedTarget = null;
 
-    // Auto Lunge
-    private static boolean wasAttackPressed = false;
-    private static int lungeStage = 0; // 0 = idle, 1 = swapped, 2 = attacked
-    private static int savedSlot = -1;
+    // ===== Auto Lunge (same style as Stun Slam) =====
+    private static boolean performingLunge = false;
+    private static int lungeStage = 0;
     private static int lungeTimer = 0;
+    private static int lungeOriginalSlot = -1;
+    private static boolean wasAttackPressed = false;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
@@ -55,52 +56,74 @@ public class AutoMaceModule {
         }
     }
 
-    // ==================== AUTO LUNGE (simplified & more aggressive) ====================
+    // ==================== AUTO LUNGE (Stun Slam style) ====================
     private static void handleAutoLunge(MinecraftClient client) {
         boolean attacking = client.options.attackKey.isPressed();
 
-        // Start
-        if (isHoldingWindCharge(client) && attacking && !wasAttackPressed && lungeStage == 0) {
-            int spearSlot = findAnySpearSlot(client); // any spear for now
+        // Start the lunge sequence when clicking with Wind Charge
+        if (!performingLunge && isHoldingWindCharge(client) && attacking && !wasAttackPressed) {
+            int spearSlot = findAnySpearSlot(client);
             if (spearSlot != -1) {
-                savedSlot = client.player.getInventory().getSelectedSlot();
-                client.player.getInventory().setSelectedSlot(spearSlot);
-                lungeStage = 1;
-                lungeTimer = 1; // very short delay
+                lungeOriginalSlot = client.player.getInventory().getSelectedSlot();
+                performingLunge = true;
+                lungeStage = 0;
+                lungeTimer = 0;
             }
-        }
-
-        if (lungeStage == 1) {
-            if (lungeTimer > 0) {
-                lungeTimer--;
-                return;
-            }
-
-            // Attack to trigger Lunge
-            client.player.swingHand(Hand.MAIN_HAND);
-
-            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
-                Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
-                client.interactionManager.attackEntity(client.player, e);
-            }
-
-            // Swap back immediately
-            if (savedSlot != -1) {
-                client.player.getInventory().setSelectedSlot(savedSlot);
-            }
-
-            lungeStage = 0;
-            savedSlot = -1;
         }
 
         wasAttackPressed = attacking;
+
+        if (!performingLunge) return;
+
+        int spearSlot = findAnySpearSlot(client);
+
+        switch (lungeStage) {
+            case 0 -> { // Swap to spear
+                if (spearSlot != -1) {
+                    client.player.getInventory().setSelectedSlot(spearSlot);
+                }
+                lungeStage = 1;
+                lungeTimer = 1; // 1 tick delay
+            }
+            case 1 -> { // Wait then attack (this should trigger Lunge)
+                if (lungeTimer > 0) {
+                    lungeTimer--;
+                    return;
+                }
+
+                // Attack
+                client.player.swingHand(Hand.MAIN_HAND);
+                if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
+                    Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
+                    client.interactionManager.attackEntity(client.player, e);
+                }
+
+                lungeStage = 2;
+                lungeTimer = 1;
+            }
+            case 2 -> { // Wait then swap back
+                if (lungeTimer > 0) {
+                    lungeTimer--;
+                    return;
+                }
+
+                if (lungeOriginalSlot != -1) {
+                    client.player.getInventory().setSelectedSlot(lungeOriginalSlot);
+                }
+
+                // Finished
+                performingLunge = false;
+                lungeStage = 0;
+                lungeTimer = 0;
+                lungeOriginalSlot = -1;
+            }
+        }
     }
 
     private static boolean isHoldingWindCharge(MinecraftClient client) {
         return client.player.getMainHandStack().isOf(Items.WIND_CHARGE);
     }
 
-    // Just find any spear (we assume you put a Lunge spear in hotbar)
     private static int findAnySpearSlot(MinecraftClient client) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = client.player.getInventory().getStack(i);
