@@ -20,20 +20,17 @@ public class AutoMaceModule {
     private static boolean performingCombo = false;
     private static int comboStage = 0;
 
-    // For detecting a real click
+    // Spear macro
     private static boolean wasAttackPressed = false;
+    private static int spearDelay = -1;          // -1 = inactive
+    private static int spearOriginalSlot = -1;
+    private static int spearSlot = -1;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
 
         // ========== SPEAR MACRO ==========
-        boolean attackPressed = client.options.attackKey.isPressed();
-
-        if (isHoldingWindCharge(client) && attackPressed && !wasAttackPressed) {
-            // This is a new click
-            performSpearMacro(client);
-        }
-        wasAttackPressed = attackPressed;
+        handleSpearMacro(client);
 
         // ========== AUTO MACE ==========
         if (cooldown > 0) {
@@ -62,25 +59,42 @@ public class AutoMaceModule {
     }
 
     // ==================== SPEAR MACRO ====================
-    private static void performSpearMacro(MinecraftClient client) {
-        int spearSlot = findSpearSlot(client);
-        if (spearSlot == -1) return; // No spear found
+    private static void handleSpearMacro(MinecraftClient client) {
+        boolean attackPressed = client.options.attackKey.isPressed();
 
-        int windSlot = client.player.getInventory().getSelectedSlot();
+        // Start the macro on a new click while holding Wind Charge
+        if (isHoldingWindCharge(client) && attackPressed && !wasAttackPressed && spearDelay == -1) {
+            spearSlot = findSpearSlot(client);
+            if (spearSlot != -1) {
+                spearOriginalSlot = client.player.getInventory().getSelectedSlot();
+                client.player.getInventory().setSelectedSlot(spearSlot); // swap to spear immediately
+                spearDelay = 3; // wait 3 ticks then attack
+            }
+        }
 
-        // Swap to spear
-        client.player.getInventory().setSelectedSlot(spearSlot);
+        // Countdown and attack
+        if (spearDelay > 0) {
+            spearDelay--;
+        } else if (spearDelay == 0) {
+            // Attack with the spear
+            if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
+                Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
+                client.interactionManager.attackEntity(client.player, entity);
+            }
+            client.player.swingHand(Hand.MAIN_HAND);
 
-        // Attack
-        client.interactionManager.attackEntity(client.player, 
-            client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY 
-                ? ((EntityHitResult) client.crosshairTarget).getEntity() 
-                : client.player); // fallback
+            // Swap back to Wind Charge
+            if (spearOriginalSlot != -1) {
+                client.player.getInventory().setSelectedSlot(spearOriginalSlot);
+            }
 
-        client.player.swingHand(Hand.MAIN_HAND);
+            // Reset
+            spearDelay = -1;
+            spearOriginalSlot = -1;
+            spearSlot = -1;
+        }
 
-        // Instantly swap back
-        client.player.getInventory().setSelectedSlot(windSlot);
+        wasAttackPressed = attackPressed;
     }
 
     private static boolean isHoldingWindCharge(MinecraftClient client) {
@@ -90,10 +104,7 @@ public class AutoMaceModule {
     private static int findSpearSlot(MinecraftClient client) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = client.player.getInventory().getStack(i);
-            Item item = stack.getItem();
-            Identifier id = Registries.ITEM.getId(item);
-
-            // Matches wooden_spear, iron_spear, netherite_spear, etc.
+            Identifier id = Registries.ITEM.getId(stack.getItem());
             if (id.getPath().contains("spear")) {
                 return i;
             }
@@ -101,7 +112,7 @@ public class AutoMaceModule {
         return -1;
     }
 
-    // ==================== AUTO MACE (unchanged logic) ====================
+    // ==================== AUTO MACE ====================
     private static LivingEntity getCrosshairTarget(MinecraftClient client) {
         if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
             return null;
