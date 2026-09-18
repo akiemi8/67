@@ -8,8 +8,8 @@ import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.hit.HitResult;
 
 public class AutoMaceModule {
     private static int cooldown = 0;
@@ -24,12 +24,14 @@ public class AutoMaceModule {
             return;
         }
 
+        // Must meet minimum fall distance
         if (client.player.fallDistance < Config.minFallDistance) {
             resetCombo(client);
             return;
         }
 
-        LivingEntity target = findTarget(client);
+        // Only target what you are actually looking at (no expanded hitboxes)
+        LivingEntity target = getCrosshairTarget(client);
         if (target == null) {
             resetCombo(client);
             return;
@@ -42,6 +44,24 @@ public class AutoMaceModule {
         } else {
             performSimpleMaceSwap(client, target);
         }
+    }
+
+    private static LivingEntity getCrosshairTarget(MinecraftClient client) {
+        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
+            return null;
+        }
+
+        Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
+        if (!(entity instanceof LivingEntity living)) return null;
+        if (!living.isAlive() || living == client.player) return null;
+        if (Config.onlyVsPlayers && !(living instanceof PlayerEntity)) return null;
+
+        // Normal vanilla reach check
+        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) {
+            return null;
+        }
+
+        return living;
     }
 
     private static void performOneTickStunSlam(MinecraftClient client, LivingEntity target) {
@@ -105,33 +125,6 @@ public class AutoMaceModule {
         if (client.interactionManager == null) return;
         client.interactionManager.attackEntity(client.player, target);
         client.player.swingHand(Hand.MAIN_HAND);
-    }
-
-    private static LivingEntity findTarget(MinecraftClient client) {
-        Vec3d eye = client.player.getEyePos();
-        double softRange = Config.range + 0.35;
-        Box box = client.player.getBoundingBox().expand(softRange);
-
-        LivingEntity best = null;
-        double bestDist = softRange * softRange;
-
-        for (Entity e : client.world.getOtherEntities(client.player, box)) {
-            if (!(e instanceof LivingEntity living)) continue;
-            if (!isValidTarget(client, living, softRange)) continue;
-
-            double d = living.squaredDistanceTo(eye);
-            if (d < bestDist) {
-                bestDist = d;
-                best = living;
-            }
-        }
-        return best;
-    }
-
-    private static boolean isValidTarget(MinecraftClient client, LivingEntity e, double maxRange) {
-        if (!e.isAlive() || e == client.player) return false;
-        if (Config.onlyVsPlayers && !(e instanceof PlayerEntity)) return false;
-        return client.player.squaredDistanceTo(e) <= maxRange * maxRange;
     }
 
     private static int findSlot(MinecraftClient client, boolean lookingForAxe) {
