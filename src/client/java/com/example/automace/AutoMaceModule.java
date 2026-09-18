@@ -7,9 +7,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
@@ -18,33 +16,23 @@ public class AutoMaceModule {
     private static int originalSlot = -1;
     private static boolean performingCombo = false;
     private static int comboStage = 0;
-    private static int comboTimer = 0;
     private static LivingEntity lockedTarget = null;
-
-    // Simple Lunge
-    private static boolean wasAttackPressed = false;
-    private static int lungeCooldown = 0;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
 
-        // ===== Simple Lunge =====
-        handleSimpleLunge(client);
-
-        // ===== STUN SLAM / AUTO MACE =====
         if (cooldown > 0) {
             cooldown--;
             return;
         }
 
         if (performingCombo) {
-            handleStunSlamSequence(client);
+            handleStunSlam(client);
             return;
         }
 
-        if (client.player.fallDistance < Config.minFallDistance) {
-            return;
-        }
+        // Only activate when falling enough
+        if (client.player.fallDistance < Config.minFallDistance) return;
 
         LivingEntity target = getCrosshairTarget(client);
         if (target == null) return;
@@ -52,70 +40,25 @@ public class AutoMaceModule {
         if (Config.oneTickStunSlam && target.isBlocking()) {
             startStunSlam(client, target);
         } else {
-            // Normal mace smash when not blocking
-            performSimpleMaceSwap(client, target);
+            // Normal mace smash
+            performMaceSmash(client, target);
         }
     }
 
-    // ==================== SIMPLE LUNGE ====================
-    private static void handleSimpleLunge(MinecraftClient client) {
-        if (lungeCooldown > 0) {
-            lungeCooldown--;
-            return;
-        }
-
-        boolean attacking = client.options.attackKey.isPressed();
-
-        if (isHoldingWindCharge(client) && attacking && !wasAttackPressed) {
-            int spearSlot = findAnySpearSlot(client);
-            if (spearSlot != -1) {
-                int windSlot = client.player.getInventory().getSelectedSlot();
-
-                client.player.getInventory().setSelectedSlot(spearSlot);
-                client.player.swingHand(Hand.MAIN_HAND);
-
-                if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
-                    Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
-                    client.interactionManager.attackEntity(client.player, e);
-                }
-
-                client.player.getInventory().setSelectedSlot(windSlot);
-                lungeCooldown = 4;
-            }
-        }
-
-        wasAttackPressed = attacking;
-    }
-
-    private static boolean isHoldingWindCharge(MinecraftClient client) {
-        return client.player.getMainHandStack().isOf(Items.WIND_CHARGE);
-    }
-
-    private static int findAnySpearSlot(MinecraftClient client) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = client.player.getInventory().getStack(i);
-            Identifier id = Registries.ITEM.getId(stack.getItem());
-            if (id.getPath().contains("spear")) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    // ==================== STUN SLAM ====================
+    // ==================== 1-TICK STUN SLAM ====================
     private static void startStunSlam(MinecraftClient client, LivingEntity target) {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
+
         if (axeSlot == -1 || maceSlot == -1) return;
 
         originalSlot = client.player.getInventory().getSelectedSlot();
         lockedTarget = target;
         performingCombo = true;
         comboStage = 0;
-        comboTimer = 0;
     }
 
-    private static void handleStunSlamSequence(MinecraftClient client) {
+    private static void handleStunSlam(MinecraftClient client) {
         LivingEntity target = lockedTarget;
 
         if (target == null || !target.isAlive() || target.isRemoved()) {
@@ -127,30 +70,17 @@ public class AutoMaceModule {
         int maceSlot = findSlot(client, false);
 
         switch (comboStage) {
-            case 0 -> { // Axe
+            case 0 -> { // Axe hit
                 if (axeSlot != -1) {
                     client.player.getInventory().setSelectedSlot(axeSlot);
                     attack(client, target);
                 }
                 comboStage = 1;
-                comboTimer = 1;
             }
-            case 1 -> { // Wait → Mace
-                if (comboTimer > 0) {
-                    comboTimer--;
-                    return;
-                }
+            case 1 -> { // Instantly Mace hit (1-tick)
                 if (maceSlot != -1) {
                     client.player.getInventory().setSelectedSlot(maceSlot);
                     attack(client, target);
-                }
-                comboStage = 2;
-                comboTimer = 1;
-            }
-            case 2 -> { // Wait → Restore
-                if (comboTimer > 0) {
-                    comboTimer--;
-                    return;
                 }
                 finishCombo(client);
             }
@@ -163,10 +93,24 @@ public class AutoMaceModule {
         }
         performingCombo = false;
         comboStage = 0;
-        comboTimer = 0;
         originalSlot = -1;
         lockedTarget = null;
-        cooldown = Math.max(3, Config.attackDelayTicks);
+        cooldown = Math.max(2, Config.attackDelayTicks);
+    }
+
+    // ==================== NORMAL MACE SMASH ====================
+    private static void performMaceSmash(MinecraftClient client, LivingEntity target) {
+        int maceSlot = findSlot(client, false);
+        if (maceSlot == -1) return;
+
+        originalSlot = client.player.getInventory().getSelectedSlot();
+        client.player.getInventory().setSelectedSlot(maceSlot);
+        attack(client, target);
+
+        if (Config.restoreSlot) {
+            client.player.getInventory().setSelectedSlot(originalSlot);
+        }
+        cooldown = Math.max(2, Config.attackDelayTicks);
     }
 
     // ==================== HELPERS ====================
@@ -184,20 +128,6 @@ public class AutoMaceModule {
             return null;
         }
         return living;
-    }
-
-    private static void performSimpleMaceSwap(MinecraftClient client, LivingEntity target) {
-        int maceSlot = findSlot(client, false);
-        if (maceSlot == -1) return;
-
-        originalSlot = client.player.getInventory().getSelectedSlot();
-        client.player.getInventory().setSelectedSlot(maceSlot);
-        attack(client, target);
-
-        if (Config.restoreSlot) {
-            client.player.getInventory().setSelectedSlot(originalSlot);
-        }
-        cooldown = Math.max(2, Config.attackDelayTicks);
     }
 
     private static void attack(MinecraftClient client, LivingEntity target) {
