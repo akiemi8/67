@@ -54,27 +54,27 @@ public class AutoMaceModule {
         }
 
         if (!performingCombo) {
-            originalSlot = client.player.getInventory().selectedSlot;
+            originalSlot = client.player.getInventory().getSelectedSlot();
             performingCombo = true;
             comboStage = 0;
         }
 
         switch (comboStage) {
             case 0 -> {
-                client.player.getInventory().selectedSlot = axeSlot;
+                client.player.getInventory().setSelectedSlot(axeSlot);
                 attack(client, target);
                 comboStage = 1;
                 cooldown = 0;
             }
             case 1 -> {
-                client.player.getInventory().selectedSlot = maceSlot;
+                client.player.getInventory().setSelectedSlot(maceSlot);
                 attack(client, target);
                 comboStage = 2;
                 cooldown = 0;
             }
             case 2 -> {
                 if (Config.restoreSlot && originalSlot != -1) {
-                    client.player.getInventory().selectedSlot = originalSlot;
+                    client.player.getInventory().setSelectedSlot(originalSlot);
                 }
                 resetCombo(client);
                 cooldown = Math.max(2, Config.attackDelayTicks);
@@ -87,15 +87,15 @@ public class AutoMaceModule {
         if (maceSlot == -1) return;
 
         if (!performingCombo) {
-            originalSlot = client.player.getInventory().selectedSlot;
+            originalSlot = client.player.getInventory().getSelectedSlot();
             performingCombo = true;
         }
 
-        client.player.getInventory().selectedSlot = maceSlot;
+        client.player.getInventory().setSelectedSlot(maceSlot);
         attack(client, target);
 
         if (Config.restoreSlot && originalSlot != -1) {
-            client.player.getInventory().selectedSlot = originalSlot;
+            client.player.getInventory().setSelectedSlot(originalSlot);
         }
         resetCombo(client);
         cooldown = Math.max(1, Config.attackDelayTicks);
