@@ -21,17 +21,17 @@ public class AutoMaceModule {
     private static int comboTimer = 0;
     private static LivingEntity lockedTarget = null;
 
-    // Simple spam Lunge
+    // Simple Lunge
     private static boolean wasAttackPressed = false;
     private static int lungeCooldown = 0;
 
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
 
-        // ===== AUTO LUNGE (spam version) =====
-        handleSpamLunge(client);
+        // ===== Simple Lunge =====
+        handleSimpleLunge(client);
 
-        // ===== STUN SLAM =====
+        // ===== STUN SLAM / AUTO MACE =====
         if (cooldown > 0) {
             cooldown--;
             return;
@@ -42,7 +42,9 @@ public class AutoMaceModule {
             return;
         }
 
-        if (client.player.fallDistance < Config.minFallDistance) return;
+        if (client.player.fallDistance < Config.minFallDistance) {
+            return;
+        }
 
         LivingEntity target = getCrosshairTarget(client);
         if (target == null) return;
@@ -50,12 +52,13 @@ public class AutoMaceModule {
         if (Config.oneTickStunSlam && target.isBlocking()) {
             startStunSlam(client, target);
         } else {
+            // Normal mace smash when not blocking
             performSimpleMaceSwap(client, target);
         }
     }
 
-    // ==================== SPAM LUNGE ====================
-    private static void handleSpamLunge(MinecraftClient client) {
+    // ==================== SIMPLE LUNGE ====================
+    private static void handleSimpleLunge(MinecraftClient client) {
         if (lungeCooldown > 0) {
             lungeCooldown--;
             return;
@@ -63,28 +66,21 @@ public class AutoMaceModule {
 
         boolean attacking = client.options.attackKey.isPressed();
 
-        // Only trigger on a new click while holding Wind Charge
         if (isHoldingWindCharge(client) && attacking && !wasAttackPressed) {
             int spearSlot = findAnySpearSlot(client);
-
             if (spearSlot != -1) {
                 int windSlot = client.player.getInventory().getSelectedSlot();
 
-                // Swap to spear
                 client.player.getInventory().setSelectedSlot(spearSlot);
-
-                // Attack (this should trigger Lunge)
                 client.player.swingHand(Hand.MAIN_HAND);
+
                 if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
                     Entity e = ((EntityHitResult) client.crosshairTarget).getEntity();
                     client.interactionManager.attackEntity(client.player, e);
                 }
 
-                // Instantly swap back
                 client.player.getInventory().setSelectedSlot(windSlot);
-
-                // Small cooldown so it doesn't completely break
-                lungeCooldown = 3;
+                lungeCooldown = 4;
             }
         }
 
@@ -131,7 +127,7 @@ public class AutoMaceModule {
         int maceSlot = findSlot(client, false);
 
         switch (comboStage) {
-            case 0 -> {
+            case 0 -> { // Axe
                 if (axeSlot != -1) {
                     client.player.getInventory().setSelectedSlot(axeSlot);
                     attack(client, target);
@@ -139,7 +135,7 @@ public class AutoMaceModule {
                 comboStage = 1;
                 comboTimer = 1;
             }
-            case 1 -> {
+            case 1 -> { // Wait → Mace
                 if (comboTimer > 0) {
                     comboTimer--;
                     return;
@@ -151,7 +147,7 @@ public class AutoMaceModule {
                 comboStage = 2;
                 comboTimer = 1;
             }
-            case 2 -> {
+            case 2 -> { // Wait → Restore
                 if (comboTimer > 0) {
                     comboTimer--;
                     return;
@@ -175,14 +171,18 @@ public class AutoMaceModule {
 
     // ==================== HELPERS ====================
     private static LivingEntity getCrosshairTarget(MinecraftClient client) {
-        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) return null;
+        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
+            return null;
+        }
 
         Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
         if (!(entity instanceof LivingEntity living)) return null;
         if (!living.isAlive() || living == client.player) return null;
         if (Config.onlyVsPlayers && !(living instanceof PlayerEntity)) return null;
 
-        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) return null;
+        if (client.player.squaredDistanceTo(living) > Config.range * Config.range) {
+            return null;
+        }
         return living;
     }
 
