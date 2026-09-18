@@ -1,6 +1,7 @@
 package com.example.automace;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -9,6 +10,7 @@ import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
@@ -20,7 +22,7 @@ public class AutoMaceModule {
     private static boolean performingCombo = false;
     private static int comboStage = 0;
     private static int comboTimer = 0;
-    private static LivingEntity lockedTarget = null; // keeps the target even if crosshair moves
+    private static LivingEntity lockedTarget = null;
 
     // Auto Lunge
     private static boolean wasAttackPressed = false;
@@ -32,7 +34,6 @@ public class AutoMaceModule {
 
         handleAutoLunge(client);
 
-        // ===== STUN SLAM / AUTO MACE =====
         if (cooldown > 0) {
             cooldown--;
             return;
@@ -43,7 +44,6 @@ public class AutoMaceModule {
             return;
         }
 
-        // Only start if we have enough fall distance
         if (client.player.fallDistance < Config.minFallDistance) {
             return;
         }
@@ -58,25 +58,22 @@ public class AutoMaceModule {
         }
     }
 
-    // ==================== IMPROVED STUN SLAM (works from high falls) ====================
+    // ==================== STUN SLAM ====================
     private static void startStunSlam(MinecraftClient client, LivingEntity target) {
         int axeSlot = findSlot(client, true);
         int maceSlot = findSlot(client, false);
-
         if (axeSlot == -1 || maceSlot == -1) return;
 
         originalSlot = client.player.getInventory().getSelectedSlot();
-        lockedTarget = target;          // lock the target so high-speed falls don't lose it
+        lockedTarget = target;
         performingCombo = true;
         comboStage = 0;
         comboTimer = 0;
     }
 
     private static void handleStunSlamSequence(MinecraftClient client) {
-        // Use the locked target instead of constantly re-checking crosshair
         LivingEntity target = lockedTarget;
 
-        // Only cancel if the target is completely gone or dead
         if (target == null || !target.isAlive() || target.isRemoved()) {
             finishCombo(client);
             return;
@@ -86,7 +83,7 @@ public class AutoMaceModule {
         int maceSlot = findSlot(client, false);
 
         switch (comboStage) {
-            case 0 -> { // Switch to axe + attack
+            case 0 -> {
                 if (axeSlot != -1) {
                     client.player.getInventory().setSelectedSlot(axeSlot);
                     attack(client, target);
@@ -175,12 +172,16 @@ public class AutoMaceModule {
         return -1;
     }
 
+    // Fixed for 1.21.11
     private static boolean hasLunge(ItemStack stack) {
-        return EnchantmentHelper.getEnchantments(stack).getEnchantmentEntries().stream()
-                .anyMatch(entry -> {
-                    Identifier id = Registries.ENCHANTMENT.getId(entry.getKey().value());
-                    return id != null && id.getPath().equals("lunge");
-                });
+        for (var entry : EnchantmentHelper.getEnchantments(stack).getEnchantmentEntries()) {
+            RegistryEntry<Enchantment> enchantEntry = entry.getKey();
+            Identifier id = enchantEntry.getKey().map(k -> k.getValue()).orElse(null);
+            if (id != null && id.getPath().equals("lunge")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ==================== HELPERS ====================
