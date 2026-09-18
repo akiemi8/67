@@ -18,7 +18,7 @@ public class AutoMaceClient implements ClientModInitializer {
                 "key.automace.opengui",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_RIGHT_SHIFT,
-                "category.automace"
+                KeyBinding.Category.MISC
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
