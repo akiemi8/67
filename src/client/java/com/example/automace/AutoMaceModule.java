@@ -17,20 +17,29 @@ public class AutoMaceModule {
     private static boolean performingCombo = false;
     private static int comboStage = 0;
 
+    // Spear macro
+    private static boolean spearMacroActive = false;
+
     public static void tick(MinecraftClient client) {
         if (client.player == null || client.interactionManager == null) return;
+
+        // === SPEAR MACRO ===
+        // If holding Wind Charge and attack is pressed → swap to Spear → click → swap back
+        if (isHoldingWindCharge(client) && client.options.attackKey.isPressed()) {
+            performSpearMacro(client);
+        }
+
+        // === AUTO MACE / STUN SLAM ===
         if (cooldown > 0) {
             cooldown--;
             return;
         }
 
-        // Must meet minimum fall distance
         if (client.player.fallDistance < Config.minFallDistance) {
             resetCombo(client);
             return;
         }
 
-        // Only target what you are actually looking at (no expanded hitboxes)
         LivingEntity target = getCrosshairTarget(client);
         if (target == null) {
             resetCombo(client);
@@ -46,6 +55,49 @@ public class AutoMaceModule {
         }
     }
 
+    // ==================== SPEAR MACRO ====================
+    private static void performSpearMacro(MinecraftClient client) {
+        int spearSlot = findSpearSlot(client);
+        if (spearSlot == -1) return;
+
+        int windChargeSlot = client.player.getInventory().getSelectedSlot();
+
+        // Swap to spear
+        client.player.getInventory().setSelectedSlot(spearSlot);
+
+        // Attack
+        if (client.crosshairTarget != null && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
+            Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
+            if (entity instanceof LivingEntity) {
+                client.interactionManager.attackEntity(client.player, entity);
+                client.player.swingHand(Hand.MAIN_HAND);
+            }
+        } else {
+            // Still swing even if no target
+            client.player.swingHand(Hand.MAIN_HAND);
+        }
+
+        // Swap back to Wind Charge
+        client.player.getInventory().setSelectedSlot(windChargeSlot);
+    }
+
+    private static boolean isHoldingWindCharge(MinecraftClient client) {
+        ItemStack stack = client.player.getMainHandStack();
+        return stack.isOf(Items.WIND_CHARGE);
+    }
+
+    private static int findSpearSlot(MinecraftClient client) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = client.player.getInventory().getStack(i);
+            // Spear item (1.21.11)
+            if (stack.getItem().toString().toLowerCase().contains("spear")) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // ==================== AUTO MACE ====================
     private static LivingEntity getCrosshairTarget(MinecraftClient client) {
         if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
             return null;
@@ -56,7 +108,6 @@ public class AutoMaceModule {
         if (!living.isAlive() || living == client.player) return null;
         if (Config.onlyVsPlayers && !(living instanceof PlayerEntity)) return null;
 
-        // Normal vanilla reach check
         if (client.player.squaredDistanceTo(living) > Config.range * Config.range) {
             return null;
         }
